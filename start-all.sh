@@ -45,6 +45,8 @@ usage() {
 Usage: ./start-all.sh [up|stop|down|status]
        ./start-all.sh --backup [PASSWORD]
        ./start-all.sh --import [PASSWORD]
+       ./start-all.sh --tables --backup [PASSWORD]
+       ./start-all.sh --tables --import
 
   up      Start all Compose projects and publish their .local hostnames (default)
   stop    Stop all Compose projects managed by this script and hostname publishers
@@ -52,6 +54,8 @@ Usage: ./start-all.sh [up|stop|down|status]
   status  Show the state of each Compose project
   --backup  Create an AES-256 encrypted env-backup.zip
   --import  Restore every environment file from env-backup.zip
+  --tables --backup  Create one encrypted ZIP containing all four Supabase database dumps
+  --tables --import  Start the stacks, then offer an optional table restore
 EOF
 }
 
@@ -59,6 +63,8 @@ die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
 ENV_ARCHIVE="$ROOT_DIR/env-backup.zip"
 ENV_MANIFEST="$ROOT_DIR/env-files.list"
+TABLE_DB_LABELS=("auditrack" "laco-ai" "metric" "lacobookstore-pos")
+TABLE_DB_CONTAINERS=("auditrack-supabase-db" "supabase-db" "metric-supabase-db" "lacobookstore-pos-db")
 
 read_password() {
   local prompt="$1" confirm="${2:-false}" password confirmation
@@ -189,6 +195,141 @@ import_all_env_files() {
   local password="$1"
   load_env_manifest
   restore_env_files "$password" "${ENV_PATHS[@]}"
+}
+
+check_supabase_db_containers() {
+  local container state
+  for container in "${TABLE_DB_CONTAINERS[@]}"; do
+    if ! docker inspect "$container" >/dev/null 2>&1; then
+      die "Supabase database container is missing: $container"
+    fi
+    state="$(docker inspect -f '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$container")"
+    [[ "$state" == running\ healthy || "$state" == running\ none ]] || die "Supabase database $container is not ready (state: $state)."
+  done
+}
+
+wait_for_supabase_dbs() {
+  local attempt container state all_ready
+  printf 'Waiting for all Supabase databases to become healthy'
+  for ((attempt=0; attempt<180; attempt++)); do
+    all_ready=1
+    for container in "${TABLE_DB_CONTAINERS[@]}"; do
+      state="$(docker inspect -f '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$container" 2>/dev/null || true)"
+      if [[ "$state" != running\ healthy && "$state" != running\ none ]]; then
+        all_ready=0
+        break
+      fi
+    done
+    if ((all_ready)); then
+      printf ' ready.\n'
+      return 0
+    fi
+    printf '.'
+    sleep 2
+  done
+  printf '\n'
+  die "Timed out waiting for the Supabase database containers."
+}
+
+backup_supabase_tables() {
+  local password="$1" temp_dir label container db_name dump_file archive_path suffix=0
+  command -v 7z >/dev/null 2>&1 || die "7z is required for AES-256 ZIP encryption."
+  check_supabase_db_containers
+  temp_dir="$(mktemp -d)"
+  chmod 0700 "$temp_dir"
+  mkdir -m 0700 "$temp_dir/tables"
+
+  for index in "${!TABLE_DB_CONTAINERS[@]}"; do
+    label="${TABLE_DB_LABELS[$index]}"
+    container="${TABLE_DB_CONTAINERS[$index]}"
+    db_name="$(docker exec "$container" sh -c 'printf %s "${POSTGRES_DB:-postgres}"')"
+    dump_file="$temp_dir/tables/$label.dump"
+    printf 'Dumping %s (%s)\n' "$label" "$container"
+    if ! docker exec "$container" pg_dump --username=postgres --dbname="$db_name" --format=custom --no-owner --no-privileges > "$dump_file"; then
+      rm -rf "$temp_dir"
+      die "Database dump failed for $label."
+    fi
+  done
+
+  printf 'Supabase PostgreSQL custom-format table/database dumps.\n' > "$temp_dir/tables/README.txt"
+  archive_path="$ROOT_DIR/supabase-tables-backup-$(date +%Y%m%d-%H%M%S).zip"
+  while [[ -e "$archive_path" ]]; do
+    ((suffix+=1))
+    archive_path="$ROOT_DIR/supabase-tables-backup-$(date +%Y%m%d-%H%M%S)-$suffix.zip"
+  done
+  if ! (cd "$temp_dir" && 7z a -tzip -mem=AES256 "-p$password" "$archive_path" tables >/dev/null); then
+    rm -rf "$temp_dir"
+    die "Could not create the encrypted Supabase tables ZIP."
+  fi
+  chmod 0600 "$archive_path"
+  set_restored_file_owner "$archive_path"
+  rm -rf "$temp_dir"
+  printf 'Encrypted Supabase tables backup created: %s\n' "$archive_path"
+}
+
+list_table_archives() {
+  shopt -s nullglob
+  TABLE_ARCHIVES=("$ROOT_DIR"/supabase-tables-backup-*.zip)
+  shopt -u nullglob
+}
+
+restore_supabase_tables() {
+  local archive="$1" password="$2" temp_dir label container dump_file db_name
+  local dump_paths=()
+  command -v 7z >/dev/null 2>&1 || die "7z is required to import the encrypted ZIP."
+  [[ -f "$archive" ]] || die "Table backup ZIP not found: $archive"
+  7z t "-p$password" "$archive" >/dev/null 2>&1 || die "Could not open the table backup ZIP. Check the password and archive."
+  check_supabase_db_containers
+
+  temp_dir="$(mktemp -d)"
+  for label in "${TABLE_DB_LABELS[@]}"; do dump_paths+=("tables/$label.dump"); done
+  if ! 7z x -y "-p$password" "-o$temp_dir" "$archive" "tables/README.txt" "${dump_paths[@]}" >/dev/null 2>&1; then
+    rm -rf "$temp_dir"
+    die "Could not extract all Supabase database dumps from the archive."
+  fi
+  for dump_file in "${dump_paths[@]}"; do
+    [[ -s "$temp_dir/$dump_file" ]] || { rm -rf "$temp_dir"; die "The archive is missing $dump_file."; }
+  done
+
+  printf 'Restoring will replace database objects and data in all four Supabase projects.\n'
+  for index in "${!TABLE_DB_CONTAINERS[@]}"; do
+    label="${TABLE_DB_LABELS[$index]}"
+    container="${TABLE_DB_CONTAINERS[$index]}"
+    dump_file="$temp_dir/tables/$label.dump"
+    db_name="$(docker exec "$container" sh -c 'printf %s "${POSTGRES_DB:-postgres}"')"
+    printf 'Restoring %s\n' "$label"
+    if ! docker exec -i "$container" pg_restore --username=postgres --dbname="$db_name" --clean --if-exists --no-owner --no-privileges --exit-on-error - < "$dump_file"; then
+      rm -rf "$temp_dir"
+      die "Database restore failed for $label. Earlier projects may already have been restored."
+    fi
+  done
+  rm -rf "$temp_dir"
+  printf 'All Supabase databases restored.\n'
+}
+
+prompt_table_import() {
+  local answer selection password archive
+  [[ -r /dev/tty ]] || { printf 'No interactive terminal; skipping optional table import.\n'; return 0; }
+  list_table_archives
+  ((${#TABLE_ARCHIVES[@]})) || { printf 'No Supabase table backup ZIPs found; skipping import prompt.\n'; return 0; }
+  printf 'Import Supabase tables from a backup ZIP now? [y/N] ' > /dev/tty
+  IFS= read -r answer < /dev/tty
+  case "${answer,,}" in
+    y|yes) ;;
+    *) printf 'Skipping Supabase table import.\n'; return 0 ;;
+  esac
+
+  printf '\nAvailable Supabase table backups:\n'
+  for index in "${!TABLE_ARCHIVES[@]}"; do
+    printf '  %d) %s\n' "$((index + 1))" "$(basename "${TABLE_ARCHIVES[$index]}")"
+  done
+  printf 'Choose a backup number: ' > /dev/tty
+  IFS= read -r selection < /dev/tty
+  [[ "$selection" =~ ^[0-9]+$ ]] && ((selection >= 1 && selection <= ${#TABLE_ARCHIVES[@]})) || die "Invalid table backup selection."
+  archive="${TABLE_ARCHIVES[$((selection - 1))]}"
+  read_password 'Table backup ZIP password: '
+  password="$REPLY"
+  restore_supabase_tables "$archive" "$password"
 }
 
 root_cmd() {
@@ -462,6 +603,32 @@ stop_projects() {
   done
 }
 
+TABLES_IMPORT_REQUESTED=0
+case "${1:-}" in
+  --tables)
+    [[ $# -ge 2 ]] || { usage >&2; exit 2; }
+    case "$2" in
+      --backup)
+        [[ $# -le 3 ]] || { usage >&2; exit 2; }
+        command -v docker >/dev/null 2>&1 || die "Docker CLI is not installed."
+        docker info >/dev/null 2>&1 || die "Cannot connect to the Docker daemon."
+        password="${3:-}"
+        if [[ -z "$password" ]]; then
+          read_password 'Supabase tables ZIP password: ' true
+          password="$REPLY"
+        fi
+        backup_supabase_tables "$password"
+        exit 0
+        ;;
+      --import)
+        [[ $# -eq 2 ]] || { usage >&2; exit 2; }
+        TABLES_IMPORT_REQUESTED=1
+        ;;
+      *) usage >&2; exit 2 ;;
+    esac
+    ;;
+esac
+
 case "${1:-}" in
   --backup)
     [[ $# -le 2 ]] || { usage >&2; exit 2; }
@@ -485,11 +652,17 @@ case "${1:-}" in
     ;;
 esac
 
-action="${1:-up}"
+if ((TABLES_IMPORT_REQUESTED)); then
+  action="up"
+else
+  action="${1:-up}"
+fi
 case "$action" in
   -h|--help|help) usage; exit 0 ;;
   up)
-    [[ $# -le 1 ]] || { usage >&2; exit 2; }
+    if ((!TABLES_IMPORT_REQUESTED)); then
+      [[ $# -le 1 ]] || { usage >&2; exit 2; }
+    fi
     command -v docker >/dev/null 2>&1 || die "Docker CLI is not installed."
     docker compose version >/dev/null 2>&1 || die "Docker Compose plugin is not available."
     ensure_env_files
@@ -499,7 +672,13 @@ case "$action" in
     ensure_host_settings "$lan_ip"
     ensure_avahi
     start_projects
+    if ((TABLES_IMPORT_REQUESTED)); then
+      wait_for_supabase_dbs
+    fi
     start_publishers "$lan_ip"
+    if ((TABLES_IMPORT_REQUESTED)); then
+      prompt_table_import
+    fi
     cat <<EOF
 
 All project stacks are started.
