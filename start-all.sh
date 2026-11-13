@@ -128,7 +128,7 @@ show_nginx_status() {
 }
 
 ensure_host_settings() {
-  local address="$1" config changed=0 hosts_src hosts_tmp managed_hosts
+  local address="$1" config changed=0 hosts_src hosts_tmp managed_hosts timeout_tmp
 
   command -v nginx >/dev/null 2>&1 || die "Nginx is not installed; install nginx before starting the stacks."
   root_cmd install -d -m 0755 /etc/nginx/conf.d
@@ -188,6 +188,44 @@ ensure_host_settings() {
   fi
   rm -f "$hosts_src"
   rm -f "$hosts_tmp"
+
+  # PDF ingestion makes multiple page-by-page AI calls before responding.
+  # Keep Nginx from returning its default 504 while that request is running.
+  timeout_tmp="$(mktemp)"
+  if awk '
+    NR == FNR {
+      if ($1 == "client_max_body_size" || $1 == "proxy_read_timeout" || $1 == "proxy_send_timeout" || $1 == "send_timeout") seen[$1] = 1
+      next
+    }
+    {
+      if ($1 == "client_max_body_size") {
+        print "        client_max_body_size 100m;"
+        next
+      }
+      if ($1 == "proxy_read_timeout" || $1 == "proxy_send_timeout" || $1 == "send_timeout") {
+        print "        " $1 " 600s;"
+        next
+      }
+      print
+      if (index($0, "proxy_set_header Connection $connection_upgrade;") > 0) {
+        anchor = 1
+        if (!seen["client_max_body_size"]) print "        client_max_body_size 100m;"
+        if (!seen["proxy_read_timeout"]) print "        proxy_read_timeout 600s;"
+        if (!seen["proxy_send_timeout"]) print "        proxy_send_timeout 600s;"
+        if (!seen["send_timeout"]) print "        send_timeout 600s;"
+      }
+    }
+    END { if (!anchor) exit 10 }
+  ' /etc/nginx/conf.d/laco.conf /etc/nginx/conf.d/laco.conf > "$timeout_tmp"; then
+    if ! cmp -s /etc/nginx/conf.d/laco.conf "$timeout_tmp"; then
+      root_cmd install -m 0644 "$timeout_tmp" /etc/nginx/conf.d/laco.conf
+      printf 'Set app.laco.local PDF proxy timeouts to 600 seconds\n'
+      changed=1
+    fi
+  else
+    printf 'WARNING: Could not add PDF proxy timeouts to /etc/nginx/conf.d/laco.conf\n' >&2
+  fi
+  rm -f "$timeout_tmp"
 
   root_cmd nginx -t
   if nginx_is_running; then
