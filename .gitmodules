@@ -1,0 +1,15 @@
+[submodule "Auditrack"]
+	path = Auditrack
+	url = https://github.com/Ru1ean/Auditrack.git
+[submodule "metric_supabase-app"]
+	path = metric_supabase-app
+	url = https://github.com/martjung-developer/metric_supabase-app.git
+[submodule "PPGS-Asset-Management"]
+	path = PPGS-Asset-Management
+	url = https://github.com/kur0gir1/PPGS-Asset-Management
+[submodule "supabase-laco-ai"]
+	path = supabase-laco-ai
+	url = https://github.com/cordyStackX/lccb_ai_2.git
+[submodule "supabase-laco-pos"]
+	path = supabase-laco-pos
+	url = https://github.com/cordyStackX/supabase-laco-pos.git
