@@ -94,8 +94,8 @@ ensure_avahi() {
     sudo_cmd=(sudo)
   fi
 
-  if ! command -v avahi-publish-address >/dev/null 2>&1; then
-    [[ -r /etc/debian_version ]] || die "avahi-publish-address is missing; install avahi-utils on Debian first."
+  if ! command -v avahi-publish >/dev/null 2>&1; then
+    [[ -r /etc/debian_version ]] || die "avahi-publish is missing; install avahi-utils on Debian first."
     "${sudo_cmd[@]}" apt-get update
     "${sudo_cmd[@]}" apt-get install -y avahi-daemon avahi-utils dbus
   fi
@@ -128,7 +128,7 @@ show_nginx_status() {
 }
 
 ensure_host_settings() {
-  local config changed=0 hosts_tmp host missing=()
+  local address="$1" config changed=0 hosts_src hosts_tmp managed_hosts
 
   command -v nginx >/dev/null 2>&1 || die "Nginx is not installed; install nginx before starting the stacks."
   root_cmd install -d -m 0755 /etc/nginx/conf.d
@@ -141,26 +141,52 @@ ensure_host_settings() {
     fi
   done
 
+  if [[ ! -f /var/www/lccb-home/index.html ]]; then
+    [[ -f "$ROOT_DIR/site/lccb-home/index.html" ]] || die "Missing homepage template: site/lccb-home/index.html"
+    root_cmd install -d -m 0755 /var/www/lccb-home
+    root_cmd install -m 0644 "$ROOT_DIR/site/lccb-home/index.html" /var/www/lccb-home/index.html
+    printf 'Restored /var/www/lccb-home/index.html\n'
+  fi
+
+  [[ -f "$ROOT_DIR/host-config/hosts" ]] || die "Missing hosts template: host-config/hosts"
+  hosts_src="$(mktemp)"
+  hosts_tmp="$(mktemp)"
   if [[ -r /etc/hosts ]]; then
-    hosts_tmp="$(mktemp)"
-    cp /etc/hosts "$hosts_tmp"
+    cp /etc/hosts "$hosts_src"
+  elif [[ ! -e /etc/hosts ]]; then
+    sed "s/^@LAN_IP@/$address/" "$ROOT_DIR/host-config/hosts" > "$hosts_src"
   else
-    hosts_tmp="$(mktemp)"
-    cat > "$hosts_tmp" <<'EOF'
-127.0.0.1 localhost
-::1 localhost
-EOF
+    die "/etc/hosts exists but is not readable. Run this script with sudo."
   fi
-  for host in "${HOSTS_ENTRIES[@]}"; do
-    if ! awk -v host="$host" '$1 !~ /^#/ { for (i = 2; i <= NF; i++) if ($i == host) found = 1 } END { exit !found }' "$hosts_tmp"; then
-      missing+=("$host")
-    fi
-  done
-  if ((${#missing[@]})); then
-    printf '\n# Local project hostnames managed by start-all.sh\n127.0.0.1 %s\n' "${missing[*]}" >> "$hosts_tmp"
+
+  managed_hosts="${HOSTS_ENTRIES[*]}"
+  awk -v address="$address" -v hostnames="$managed_hosts" '
+    BEGIN { count = split(hostnames, managed, " ") }
+    $0 == "# Project names managed by start-all.sh" { next }
+    /^[[:space:]]*#/ || NF == 0 { print; next }
+    {
+      line = $1
+      kept = 0
+      comment = ""
+      for (i = 2; i <= NF; i++) {
+        if ($i ~ /^#/) {
+          for (j = i; j <= NF; j++) comment = comment (comment == "" ? "" : " ") $j
+          break
+        }
+        remove = 0
+        for (j = 1; j <= count; j++) if ($i == managed[j]) remove = 1
+        if (!remove) { line = line " " $i; kept++ }
+      }
+      if (kept > 0 || comment != "") print line (comment != "" ? " " comment : "")
+    }
+    END { print "# Project names managed by start-all.sh"; print address, hostnames }
+  ' "$hosts_src" > "$hosts_tmp"
+
+  if [[ ! -e /etc/hosts ]] || ! cmp -s /etc/hosts "$hosts_tmp"; then
     root_cmd install -m 0644 "$hosts_tmp" /etc/hosts
-    printf 'Added missing names to /etc/hosts: %s\n' "${missing[*]}"
+    printf 'Mapped project names in /etc/hosts to %s\n' "$address"
   fi
+  rm -f "$hosts_src"
   rm -f "$hosts_tmp"
 
   root_cmd nginx -t
@@ -185,22 +211,32 @@ EOF
 }
 
 start_publishers() {
-  local address="$1" hostname pid_file pid
+  local address="$1" hostname pid_file pid process_name
   mkdir -p "$RUNTIME_DIR"
   for hostname in "${HOSTNAMES[@]}"; do
     pid_file="$RUNTIME_DIR/$hostname.pid"
     if [[ -f "$pid_file" ]]; then
       read -r pid < "$pid_file" || true
       if [[ -n "${pid:-}" ]] && kill -0 "$pid" 2>/dev/null \
-        && [[ "$(ps -p "$pid" -o comm= 2>/dev/null | tr -d '[:space:]')" == avahi-publish-address ]]; then
+        && [[ "$(ps -p "$pid" -o comm= 2>/dev/null | tr -d '[:space:]')" == avahi-publish ]]; then
         continue
       fi
       rm -f "$pid_file"
     fi
-    avahi-publish-address -R "$hostname" "$address" >/dev/null 2>&1 &
+    avahi-publish -a -R "$hostname" "$address" >"$RUNTIME_DIR/$hostname.log" 2>&1 &
     printf '%s\n' "$!" > "$pid_file"
+    pid="$!"
+    sleep 0.1
+    process_name="$(ps -p "$pid" -o comm= 2>/dev/null | tr -d '[:space:]' || true)"
+    if [[ "$process_name" != avahi-publish ]]; then
+      printf 'ERROR: Avahi failed to publish %s at %s.\n' "$hostname" "$address" >&2
+      cat "$RUNTIME_DIR/$hostname.log" >&2 || true
+      rm -f "$pid_file"
+      return 1
+    fi
+    printf 'Avahi: %s -> %s\n' "$hostname" "$address"
   done
-  printf 'Published %s names at %s via Avahi.\n' "${#HOSTNAMES[@]}" "$address"
+  printf 'Started Avahi publishers for %s names at %s.\n' "${#HOSTNAMES[@]}" "$address"
 }
 
 stop_publishers() {
@@ -210,7 +246,7 @@ stop_publishers() {
     [[ -f "$pid_file" ]] || continue
     read -r pid < "$pid_file" || true
     if [[ -n "${pid:-}" ]] && kill -0 "$pid" 2>/dev/null \
-      && [[ "$(ps -p "$pid" -o comm= 2>/dev/null | tr -d '[:space:]')" == avahi-publish-address ]]; then
+      && [[ "$(ps -p "$pid" -o comm= 2>/dev/null | tr -d '[:space:]')" == avahi-publish ]]; then
       kill "$pid" 2>/dev/null || true
     fi
     rm -f "$pid_file"
@@ -260,7 +296,7 @@ case "$action" in
     docker info >/dev/null 2>&1 || die "Cannot connect to the Docker daemon. Give this Debian container access to /var/run/docker.sock and the required socket permissions."
     command -v ip >/dev/null 2>&1 || die "The iproute2 package is required to detect the LAN address."
     lan_ip="$(detect_lan_ip)"
-    ensure_host_settings
+    ensure_host_settings "$lan_ip"
     ensure_avahi
     start_projects
     start_publishers "$lan_ip"

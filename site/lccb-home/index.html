@@ -1,0 +1,713 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>New Tab</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        body {
+            background-color: #ffffff;
+            color: #0f172a;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 40px 20px 40px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        /* Geometric Abstract Blue Background Elements (Inspired by Reference Images) */
+        .geometric-background {
+            position: absolute;
+            inset: 0;
+            overflow: hidden;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .geo-entity {
+            position: absolute;
+            pointer-events: none;
+            will-change: transform;
+        }
+
+        /* Gradient Spheres & Circles (LCCB Official Blue Palette) */
+        .sphere-lg {
+            border-radius: 50%;
+            background: radial-gradient(circle at 35% 30%, rgba(24, 144, 239, 0.45) 0%, rgba(17, 125, 198, 0.28) 55%, rgba(10, 55, 156, 0.1) 100%);
+        }
+
+        .sphere-md {
+            border-radius: 50%;
+            background: radial-gradient(circle at 35% 35%, #1890EF 0%, #117DC6 60%, #0A379C 100%);
+            opacity: 0.4;
+            box-shadow: 0 10px 30px rgba(17, 125, 198, 0.25);
+        }
+
+        .sphere-sm {
+            border-radius: 50%;
+            background: radial-gradient(circle at 30% 30%, rgba(96, 182, 251, 0.45) 0%, rgba(17, 125, 198, 0.15) 100%);
+        }
+
+        /* Specific positions for spheres */
+        .tr-sphere {
+            width: 500px;
+            height: 500px;
+            top: -130px;
+            right: -110px;
+            animation: slowDrift1 18s ease-in-out infinite alternate;
+        }
+
+        .bl-sphere {
+            width: 480px;
+            height: 480px;
+            bottom: -140px;
+            left: -120px;
+            animation: slowDrift2 22s ease-in-out infinite alternate;
+        }
+
+        .br-sphere {
+            width: 230px;
+            height: 230px;
+            bottom: 40px;
+            right: 90px;
+            animation: slowDrift3 16s ease-in-out infinite alternate;
+        }
+
+        .tl-sphere {
+            width: 320px;
+            height: 320px;
+            top: 30px;
+            left: -90px;
+            animation: slowDrift4 20s ease-in-out infinite alternate;
+        }
+
+        /* Circular Wireframe Rings / Orbits */
+        .ring-orbit {
+            border-radius: 50%;
+            border: 1.5px solid rgba(17, 125, 198, 0.4);
+        }
+
+        .tr-ring {
+            width: 390px;
+            height: 390px;
+            top: -70px;
+            right: -50px;
+            animation: slowOrbit 45s linear infinite;
+        }
+
+        .bl-ring {
+            width: 420px;
+            height: 420px;
+            bottom: -100px;
+            left: -80px;
+            border-color: rgba(10, 55, 156, 0.35);
+            animation: slowOrbitRev 55s linear infinite;
+        }
+
+        .br-ring {
+            width: 290px;
+            height: 290px;
+            bottom: 10px;
+            right: 60px;
+            border: 1.5px dashed rgba(24, 144, 239, 0.45);
+            animation: slowOrbit 35s linear infinite;
+        }
+
+        /* Diagonal Striped Circles (Image 1 Style) */
+        .striped-circle {
+            border-radius: 50%;
+            background: repeating-linear-gradient(-45deg,
+                    rgba(17, 125, 198, 0.38) 0px,
+                    rgba(17, 125, 198, 0.38) 3.5px,
+                    transparent 3.5px,
+                    transparent 11px);
+        }
+
+        .tr-stripes {
+            width: 175px;
+            height: 175px;
+            top: 120px;
+            right: 230px;
+            animation: slowDrift3 19s ease-in-out infinite alternate;
+        }
+
+        .bl-stripes {
+            width: 145px;
+            height: 145px;
+            bottom: 105px;
+            left: 210px;
+            animation: slowDrift1 15s ease-in-out infinite alternate;
+        }
+
+        /* Dot Matrix / Grid Blocks (Image 1 & 2 Style) */
+        .dot-grid {
+            background-image: radial-gradient(rgba(17, 125, 198, 0.45) 1.5px, transparent 1.5px);
+            background-size: 15px 15px;
+        }
+
+        .tr-dots {
+            width: 120px;
+            height: 90px;
+            top: 65px;
+            right: 430px;
+            animation: slowDrift2 24s ease-in-out infinite alternate;
+        }
+
+        .bl-dots {
+            width: 110px;
+            height: 105px;
+            bottom: 75px;
+            left: 380px;
+            animation: slowDrift4 20s ease-in-out infinite alternate;
+        }
+
+        .tl-dots {
+            width: 95px;
+            height: 80px;
+            top: 95px;
+            left: 210px;
+            animation: slowDrift1 26s ease-in-out infinite alternate;
+        }
+
+        /* Micro-Accents (Plus, Ring, Triangle, Waves) */
+        .geo-accent {
+            position: absolute;
+            pointer-events: none;
+            user-select: none;
+            will-change: transform;
+        }
+
+        .accent-plus {
+            font-size: 22px;
+            font-weight: 300;
+            color: rgba(17, 125, 198, 0.7);
+            line-height: 1;
+        }
+
+        .p1 {
+            top: 110px;
+            left: 16%;
+            animation: pulseFloat 12s ease-in-out infinite alternate;
+        }
+
+        .p2 {
+            top: 26%;
+            right: 15%;
+            animation: pulseFloat 14s ease-in-out infinite alternate;
+        }
+
+        .p3 {
+            bottom: 22%;
+            left: 18%;
+            animation: pulseFloat 10s ease-in-out infinite alternate;
+        }
+
+        .p4 {
+            bottom: 15%;
+            right: 28%;
+            animation: pulseFloat 16s ease-in-out infinite alternate;
+        }
+
+        .accent-circle {
+            width: 15px;
+            height: 15px;
+            border: 2px solid rgba(24, 144, 239, 0.6);
+            border-radius: 50%;
+        }
+
+        .c1 {
+            top: 22%;
+            left: 24%;
+            animation: pulseFloat 15s ease-in-out infinite alternate;
+        }
+
+        .c2 {
+            top: 18%;
+            right: 32%;
+            animation: pulseFloat 13s ease-in-out infinite alternate;
+        }
+
+        .c3 {
+            bottom: 26%;
+            right: 18%;
+            animation: pulseFloat 17s ease-in-out infinite alternate;
+        }
+
+        .accent-wave {
+            width: 52px;
+            height: 14px;
+            opacity: 0.65;
+        }
+
+        .w1 {
+            top: 23%;
+            right: 23%;
+            animation: slowDrift3 14s ease-in-out infinite alternate;
+        }
+
+        .w2 {
+            bottom: 29%;
+            left: 22%;
+            animation: slowDrift2 18s ease-in-out infinite alternate;
+        }
+
+        .accent-triangle {
+            width: 18px;
+            height: 18px;
+            opacity: 0.6;
+        }
+
+        .t1 {
+            top: 31%;
+            right: 10%;
+            animation: slowDrift1 16s ease-in-out infinite alternate;
+        }
+
+        .t2 {
+            bottom: 18%;
+            left: 28%;
+            animation: slowDrift4 15s ease-in-out infinite alternate;
+        }
+
+        /* Gentle slight motion keyframes */
+        @keyframes slowDrift1 {
+            0% {
+                transform: translate(0, 0);
+            }
+
+            50% {
+                transform: translate(16px, -18px);
+            }
+
+            100% {
+                transform: translate(-10px, 12px);
+            }
+        }
+
+        @keyframes slowDrift2 {
+            0% {
+                transform: translate(0, 0);
+            }
+
+            50% {
+                transform: translate(-18px, 14px);
+            }
+
+            100% {
+                transform: translate(12px, -14px);
+            }
+        }
+
+        @keyframes slowDrift3 {
+            0% {
+                transform: translate(0, 0);
+            }
+
+            50% {
+                transform: translate(14px, 16px);
+            }
+
+            100% {
+                transform: translate(-12px, -10px);
+            }
+        }
+
+        @keyframes slowDrift4 {
+            0% {
+                transform: translate(0, 0);
+            }
+
+            50% {
+                transform: translate(-14px, -16px);
+            }
+
+            100% {
+                transform: translate(10px, 14px);
+            }
+        }
+
+        @keyframes slowOrbit {
+            from {
+                transform: rotate(0deg);
+            }
+
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        @keyframes slowOrbitRev {
+            from {
+                transform: rotate(360deg);
+            }
+
+            to {
+                transform: rotate(0deg);
+            }
+        }
+
+        @keyframes pulseFloat {
+            0% {
+                transform: translate(0, 0) scale(1);
+                opacity: 0.45;
+            }
+
+            50% {
+                transform: translate(8px, -10px) scale(1.08);
+                opacity: 0.8;
+            }
+
+            100% {
+                transform: translate(-6px, 8px) scale(0.95);
+                opacity: 0.45;
+            }
+        }
+
+        /* Wrapper Container (Elevated above streaks) */
+        .shortcuts-wrapper {
+            width: 100%;
+            max-width: 860px;
+            position: relative;
+            z-index: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        /* LCCB Logo */
+        .logo-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin-bottom: 38px;
+            width: 100%;
+        }
+
+        .main-logo {
+            max-width: 380px;
+            width: 85%;
+            height: auto;
+            object-fit: contain;
+            filter: drop-shadow(0 2px 10px rgba(17, 125, 198, 0.16));
+            transition: transform 0.25s ease;
+        }
+
+        .main-logo:hover {
+            transform: scale(1.02);
+        }
+
+        .shortcuts-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(125px, 1fr));
+            gap: 22px 18px;
+            justify-items: center;
+            width: 100%;
+        }
+
+        .shortcut-card {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-decoration: none;
+            color: #1e293b;
+            width: 125px;
+            padding: 14px 8px 12px;
+            border-radius: 14px;
+            position: relative;
+            transition: background 0.2s ease, transform 0.2s ease;
+            cursor: pointer;
+        }
+
+        .shortcut-card:hover {
+            background-color: rgba(17, 125, 198, 0.08);
+            transform: translateY(-3px);
+            z-index: 20;
+        }
+
+        /* Custom Hover Tooltip */
+        .shortcut-tooltip {
+            position: absolute;
+            bottom: calc(100% + 12px);
+            left: 50%;
+            transform: translateX(-50%) translateY(6px);
+            width: 240px;
+            padding: 10px 13px;
+            background: rgba(10, 55, 156, 0.95);
+            color: #ffffff;
+            font-size: 11.5px;
+            line-height: 1.45;
+            font-weight: 400;
+            text-align: center;
+            border-radius: 9px;
+            box-shadow: 0 10px 25px -4px rgba(10, 55, 156, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.2);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
+            transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease;
+            z-index: 100;
+        }
+
+        .shortcut-tooltip::after {
+            content: "";
+            position: absolute;
+            top: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            border-width: 6px;
+            border-style: solid;
+            border-color: rgba(10, 55, 156, 0.95) transparent transparent transparent;
+        }
+
+        .shortcut-card:hover .shortcut-tooltip {
+            opacity: 1;
+            visibility: visible;
+            transform: translateX(-50%) translateY(0);
+        }
+
+        /* Icon Circle (Enlarged, sleek glassmorphism) */
+        .icon-circle {
+            width: 68px;
+            height: 68px;
+            border-radius: 50%;
+            background-color: rgba(255, 255, 255, 0.88);
+            border: 1px solid rgba(17, 125, 198, 0.22);
+            box-shadow: 0 4px 18px rgba(17, 125, 198, 0.12);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 11px;
+            position: relative;
+            overflow: hidden;
+            flex-shrink: 0;
+            transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+        }
+
+        .shortcut-card:hover .icon-circle {
+            background-color: #ffffff;
+            border-color: rgba(17, 125, 198, 0.55);
+            box-shadow: 0 8px 24px rgba(17, 125, 198, 0.28);
+            transform: scale(1.04);
+        }
+
+        /* Enlarged Icons */
+        .icon-img {
+            width: 38px;
+            height: 38px;
+            object-fit: contain;
+            display: block;
+        }
+
+        .icon-svg {
+            width: 34px;
+            height: 34px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .icon-svg svg {
+            width: 100%;
+            height: 100%;
+        }
+
+        /* Fallback Initials Badge */
+        .icon-letter {
+            font-size: 24px;
+            font-weight: 700;
+            color: #0284c7;
+            text-transform: uppercase;
+            user-select: none;
+        }
+
+        /* Shortcut Label */
+        .shortcut-title {
+            font-size: 13.5px;
+            line-height: 18px;
+            font-weight: 600;
+            text-align: center;
+            width: 100%;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            padding: 0 4px;
+            color: #0f172a;
+        }
+
+        .shortcut-url {
+            font-size: 11px;
+            color: #64748b;
+            margin-top: 3px;
+            max-width: 100%;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- Abstract Geometric Blue Entities (Inspired by Reference Images) -->
+    <div class="geometric-background">
+        <!-- Top Right Cluster -->
+        <div class="geo-entity sphere-lg tr-sphere"></div>
+        <div class="geo-entity ring-orbit tr-ring"></div>
+        <div class="geo-entity striped-circle tr-stripes"></div>
+        <div class="geo-entity dot-grid tr-dots"></div>
+
+        <!-- Bottom Left Cluster -->
+        <div class="geo-entity sphere-lg bl-sphere"></div>
+        <div class="geo-entity ring-orbit bl-ring"></div>
+        <div class="geo-entity striped-circle bl-stripes"></div>
+        <div class="geo-entity dot-grid bl-dots"></div>
+
+        <!-- Bottom Right Sphere & Arc -->
+        <div class="geo-entity sphere-md br-sphere"></div>
+        <div class="geo-entity ring-orbit br-ring"></div>
+
+        <!-- Top Left Subtle Accent -->
+        <div class="geo-entity sphere-sm tl-sphere"></div>
+        <div class="geo-entity dot-grid tl-dots"></div>
+
+        <!-- Floating Micro-Accents (Plus, Ring, Triangle, Waves) -->
+        <div class="geo-accent accent-plus p1">+</div>
+        <div class="geo-accent accent-plus p2">+</div>
+        <div class="geo-accent accent-plus p3">+</div>
+        <div class="geo-accent accent-plus p4">+</div>
+        <div class="geo-accent accent-circle c1"></div>
+        <div class="geo-accent accent-circle c2"></div>
+        <div class="geo-accent accent-circle c3"></div>
+        <svg class="geo-accent accent-wave w1" viewBox="0 0 60 16" fill="none">
+            <path d="M2 8 C 8 2, 14 14, 20 8 C 26 2, 32 14, 38 8 C 44 2, 50 14, 56 8" stroke="#117DC6"
+                stroke-width="2.2" stroke-linecap="round" />
+        </svg>
+        <svg class="geo-accent accent-wave w2" viewBox="0 0 60 16" fill="none">
+            <path d="M2 8 C 8 2, 14 14, 20 8 C 26 2, 32 14, 38 8 C 44 2, 50 14, 56 8" stroke="#1890EF"
+                stroke-width="2.2" stroke-linecap="round" />
+        </svg>
+        <svg class="geo-accent accent-triangle t1" viewBox="0 0 20 20" fill="none">
+            <polygon points="10,2 18,18 2,18" stroke="#003DA8" stroke-width="2" stroke-linejoin="round" />
+        </svg>
+        <svg class="geo-accent accent-triangle t2" viewBox="0 0 20 20" fill="none">
+            <polygon points="10,2 18,18 2,18" stroke="#1890EF" stroke-width="2" stroke-linejoin="round" />
+        </svg>
+    </div>
+
+    <!-- Shortcuts Grid with LCCB Logo at the top -->
+    <div class="shortcuts-wrapper">
+        <div class="logo-container">
+            <img class="main-logo"
+                src="https://i0.wp.com/lcc.edu.ph/wp-content/uploads/2021/08/LCC-LOGO-WEBSITE-e1632967735796.png?fit=1920%2C326&ssl=1"
+                alt="LCCB Logo" />
+        </div>
+
+        <div class="shortcuts-grid" id="shortcutsGrid"></div>
+    </div>
+
+    <script>
+        // Shortcuts list
+        const shortcuts = [
+            {
+                name: "LACO AI",
+                url: "http://app.laco.local",
+                domain: "app.laco.local",
+                customIcon: "https://raw.githubusercontent.com/cordyStackX/lccb_ai_2/refs/heads/main/lccb_ai_2/public/logo3_notitle.png",
+                description: "An AI-powered document assistant for La Consolacion College Bacolod to analyze PDFs, generate summaries, and securely query academic records."
+            },
+            {
+                name: "M.E.T.R.I.C.",
+                url: "http://app.metric.local",
+                domain: "app.metric.local",
+                customIcon: "https://raw.githubusercontent.com/martjung-developer/metric_supabase-app/refs/heads/main/metric-app/public/images/metriclogo-title.png",
+                description: "A comprehensive mock board examination platform for students to take practice exams, access review materials, and track performance analytics."
+            },
+            {
+                name: "Auditrack",
+                url: "http://auditrack.local",
+                domain: "auditrack.local",
+                customIcon: "https://raw.githubusercontent.com/Ru1ean/Auditrack/refs/heads/main/frontend/public/favicon.png",
+                description: "A centralized platform built to digitize the accreditation process by structuring compliance requirements directly across academic programs and offices."
+            },
+            {
+                name: "Bookstore POS",
+                url: "http://lacobookstore-pos.local",
+                domain: "lacobookstore-pos.local",
+                customIcon: "https://raw.githubusercontent.com/Chair05/LACO-Bookstore-POS/refs/heads/main/supabase-project/frontend/src/assets/LCCB-Logo.jpeg",
+                description: "A point-of-sale system designed to simplify bookstore transactions, manage products, and monitor inventory at La Consolacion College Bacolod."
+            },
+            {
+                name: "LCCB Assetory",
+                url: "http://lccb.assetory.local",
+                domain: "lccb.assetory.local",
+                customIcon: "https://file.garden/aoVl-M0-p1TyFay4/assetory%20logo.png",
+                description: "Real-time fixed asset & inventory tracking system for LCCB PPGS to manage, locate, maintain, and audit campus property across buildings and rooms."
+            }
+        ];
+
+        function renderShortcuts() {
+            const grid = document.getElementById("shortcutsGrid");
+            grid.innerHTML = "";
+
+            shortcuts.forEach((item) => {
+                const card = document.createElement("a");
+                card.className = "shortcut-card";
+                card.href = item.url;
+                card.target = "_self";
+                if (!item.description) {
+                    card.title = `${item.name} (${item.url})`;
+                }
+
+                let iconHtml = "";
+                if (item.customIcon) {
+                    iconHtml = `
+                        <img class="icon-img" src="${item.customIcon}" alt="${item.name}" 
+                          onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />
+                        <div class="icon-letter" style="display:none;">${item.name.charAt(0)}</div>
+                    `;
+                } else if (item.svg) {
+                    iconHtml = `<div class="icon-svg">${item.svg}</div>`;
+                } else {
+                    const faviconUrl = `https://www.google.com/s2/favicons?domain=${item.domain || item.url}&sz=64`;
+                    iconHtml = `
+                        <img class="icon-img" src="${faviconUrl}" alt="${item.name}" 
+                          onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />
+                        <div class="icon-letter" style="display:none;">${item.name.charAt(0)}</div>
+                    `;
+                }
+
+                const tooltipHtml = item.description ? `<div class="shortcut-tooltip">${item.description}</div>` : "";
+
+                card.innerHTML = `
+                    <div class="icon-circle">
+                        ${iconHtml}
+                    </div>
+                    <div class="shortcut-title">${item.name}</div>
+                    <div class="shortcut-url">${item.domain || item.url.replace(/^https?:\/\//, '')}</div>
+                    ${tooltipHtml}
+                `;
+
+                grid.appendChild(card);
+            });
+        }
+
+        // Initialize
+        renderShortcuts();
+    </script>
+</body>
+
+</html>

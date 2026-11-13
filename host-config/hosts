@@ -1,0 +1,5 @@
+# Static table lookup for hostnames.
+# See hosts(5) for details.
+127.0.0.1        localhost
+::1              localhost
+@LAN_IP@ lccb.local kong.local kong  app.laco.local auditrack.local lacobookstore-pos.local lccb.assetory.local app.metric.local
