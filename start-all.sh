@@ -43,15 +43,153 @@ NGINX_CONFIGS=(
 usage() {
   cat <<'EOF'
 Usage: ./start-all.sh [up|stop|down|status]
+       ./start-all.sh --backup [PASSWORD]
+       ./start-all.sh --import [PASSWORD]
 
   up      Start all Compose projects and publish their .local hostnames (default)
   stop    Stop all Compose projects managed by this script and hostname publishers
   down    Alias for stop
   status  Show the state of each Compose project
+  --backup  Create an AES-256 encrypted env-backup.zip
+  --import  Restore every environment file from env-backup.zip
 EOF
 }
 
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+
+ENV_ARCHIVE="$ROOT_DIR/env-backup.zip"
+ENV_MANIFEST="$ROOT_DIR/env-files.list"
+
+read_password() {
+  local prompt="$1" confirm="${2:-false}" password confirmation
+  [[ -r /dev/tty ]] || die "No terminal available to read the backup password. Pass it as an argument."
+  printf '%s' "$prompt" > /dev/tty
+  IFS= read -r -s password < /dev/tty
+  printf '\n' > /dev/tty
+  [[ -n "$password" ]] || die "Password cannot be empty."
+  if [[ "$confirm" == "true" ]]; then
+    printf 'Confirm password: ' > /dev/tty
+    IFS= read -r -s confirmation < /dev/tty
+    printf '\n' > /dev/tty
+    [[ "$password" == "$confirmation" ]] || die "Passwords do not match."
+  fi
+  REPLY="$password"
+}
+
+validate_env_path() {
+  local path="$1"
+  [[ "$path" != /* && "$path" != *".."* && ( "$path" == ".env" || "$path" == */.env || "$path" == ".env.local" || "$path" == */.env.local ) ]]
+}
+
+load_env_manifest() {
+  [[ -f "$ENV_MANIFEST" ]] || die "Missing environment file manifest: $ENV_MANIFEST"
+  mapfile -t ENV_PATHS < <(sed '/^[[:space:]]*#/d; /^[[:space:]]*$/d' "$ENV_MANIFEST")
+  ((${#ENV_PATHS[@]} > 0)) || die "The environment file manifest is empty."
+  local path
+  for path in "${ENV_PATHS[@]}"; do
+    validate_env_path "$path" || die "Invalid path in env-files.list: $path"
+  done
+}
+
+set_restored_file_owner() {
+  local path="$1"
+  if [[ -n "${SUDO_USER:-}" ]]; then
+    chown "$SUDO_USER:$(id -gn "$SUDO_USER")" "$path"
+  fi
+}
+
+backup_env_files() {
+  local password="$1" temp_dir actual_list merged_manifest archive_list path
+  command -v 7z >/dev/null 2>&1 || die "7z is required for AES-256 ZIP encryption. Install the Debian 7zip package first."
+  load_env_manifest
+  for path in "${ENV_PATHS[@]}"; do
+    [[ -f "$ROOT_DIR/$path" ]] || die "Cannot create a complete backup; required file is missing: $path"
+  done
+
+  temp_dir="$(mktemp -d "$ROOT_DIR/.env-backup.XXXXXX")"
+  actual_list="$temp_dir/current-files.list"
+  merged_manifest="$temp_dir/env-files.list"
+  archive_list="$temp_dir/archive-files.list"
+  (
+    cd "$ROOT_DIR"
+    find . -type d \( -name .git -o -name node_modules -o -name volumes \) -prune -o \
+      -type f \( -name .env -o -name .env.local \) -print | sed 's#^\./##' | sort -u
+  ) > "$actual_list" || { rm -rf "$temp_dir"; die "Could not scan environment files. Check directory permissions."; }
+  cat "$ENV_MANIFEST" "$actual_list" | sed '/^[[:space:]]*#/d; /^[[:space:]]*$/d' | sort -u > "$merged_manifest"
+  while IFS= read -r path; do
+    validate_env_path "$path" || { rm -rf "$temp_dir"; die "Invalid environment file path: $path"; }
+    [[ -f "$ROOT_DIR/$path" ]] || { rm -rf "$temp_dir"; die "Cannot back up missing environment file: $path"; }
+  done < "$merged_manifest"
+
+  cp "$merged_manifest" "$ENV_MANIFEST"
+  cat "$merged_manifest" > "$archive_list"
+  printf 'env-files.list\n' >> "$archive_list"
+  (
+    cd "$ROOT_DIR"
+    7z a -tzip -mem=AES256 "-p$password" "$temp_dir/env-backup.zip" "@$archive_list" >/dev/null
+  ) || { rm -rf "$temp_dir"; die "Could not create the encrypted ZIP archive."; }
+  chmod 0600 "$temp_dir/env-backup.zip"
+  mv -f "$temp_dir/env-backup.zip" "$ENV_ARCHIVE"
+  chmod 0600 "$ENV_ARCHIVE"
+  set_restored_file_owner "$ENV_ARCHIVE"
+  rm -rf "$temp_dir"
+  printf 'Encrypted backup created: %s (%s environment files)\n' "$ENV_ARCHIVE" "$(wc -l < "$ENV_MANIFEST" | tr -d '[:space:]')"
+}
+
+restore_env_files() {
+  local password="$1" temp_dir path source_path target_path
+  shift
+  local paths=("$@")
+  command -v 7z >/dev/null 2>&1 || die "7z is required to import the encrypted ZIP."
+  [[ -f "$ENV_ARCHIVE" ]] || die "Backup archive not found: $ENV_ARCHIVE. Create it with --backup first."
+  ((${#paths[@]} > 0)) || { printf 'All environment files already exist. Nothing to restore.\n'; return 0; }
+
+  7z t "-p$password" "$ENV_ARCHIVE" >/dev/null 2>&1 || die "Could not open the backup ZIP. Check the password and archive."
+  temp_dir="$(mktemp -d)"
+  for path in "${paths[@]}"; do
+    validate_env_path "$path" || { rm -rf "$temp_dir"; die "Invalid environment file path: $path"; }
+    7z x -y "-p$password" "-o$temp_dir" "$ENV_ARCHIVE" "$path" >/dev/null 2>&1 || {
+      rm -rf "$temp_dir"
+      die "Could not restore $path from the backup ZIP."
+    }
+    source_path="$temp_dir/$path"
+    target_path="$ROOT_DIR/$path"
+    [[ -f "$source_path" ]] || { rm -rf "$temp_dir"; die "The backup ZIP does not contain $path."; }
+    mkdir -p "$(dirname "$target_path")"
+    install -m 0600 "$source_path" "$target_path"
+    set_restored_file_owner "$target_path"
+    printf 'Restored %s\n' "$path"
+  done
+  rm -rf "$temp_dir"
+}
+
+ensure_env_files() {
+  local path password missing=()
+  load_env_manifest
+  for path in "${ENV_PATHS[@]}"; do
+    [[ -f "$ROOT_DIR/$path" ]] || missing+=("$path")
+  done
+  if ((${#missing[@]})); then
+    printf 'Environment files are missing; restoring from the encrypted backup before Docker starts:\n'
+    printf '  %s\n' "${missing[@]}"
+    if [[ -n "${IMPORT_PASSWORD:-}" ]]; then
+      password="$IMPORT_PASSWORD"
+    else
+      read_password 'Backup ZIP password: '
+      password="$REPLY"
+    fi
+    restore_env_files "$password" "${missing[@]}"
+    for path in "${missing[@]}"; do
+      [[ -f "$ROOT_DIR/$path" ]] || die "Environment restore incomplete; Docker will not start. Missing: $path"
+    done
+  fi
+}
+
+import_all_env_files() {
+  local password="$1"
+  load_env_manifest
+  restore_env_files "$password" "${ENV_PATHS[@]}"
+}
 
 root_cmd() {
   if [[ "$(id -u)" -eq 0 ]]; then
@@ -324,6 +462,29 @@ stop_projects() {
   done
 }
 
+case "${1:-}" in
+  --backup)
+    [[ $# -le 2 ]] || { usage >&2; exit 2; }
+    password="${2:-}"
+    if [[ -z "$password" ]]; then
+      read_password 'Backup ZIP password: ' true
+      password="$REPLY"
+    fi
+    backup_env_files "$password"
+    exit 0
+    ;;
+  --import)
+    [[ $# -le 2 ]] || { usage >&2; exit 2; }
+    password="${2:-}"
+    if [[ -z "$password" ]]; then
+      read_password 'Backup ZIP password: '
+      password="$REPLY"
+    fi
+    import_all_env_files "$password"
+    exit 0
+    ;;
+esac
+
 action="${1:-up}"
 case "$action" in
   -h|--help|help) usage; exit 0 ;;
@@ -331,6 +492,7 @@ case "$action" in
     [[ $# -le 1 ]] || { usage >&2; exit 2; }
     command -v docker >/dev/null 2>&1 || die "Docker CLI is not installed."
     docker compose version >/dev/null 2>&1 || die "Docker Compose plugin is not available."
+    ensure_env_files
     docker info >/dev/null 2>&1 || die "Cannot connect to the Docker daemon. Give this Debian container access to /var/run/docker.sock and the required socket permissions."
     command -v ip >/dev/null 2>&1 || die "The iproute2 package is required to detect the LAN address."
     lan_ip="$(detect_lan_ip)"

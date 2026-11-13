@@ -1,0 +1,13 @@
+Auditrack/backend/.env
+Auditrack/.env
+Auditrack/frontend/.env
+metric_supabase-app/.env
+metric_supabase-app/metric-app/.env
+PPGS-Asset-Management/backend/.env
+PPGS-Asset-Management/frontend/.env
+supabase-laco-ai/.env
+supabase-laco-ai/lccb_ai_2/.env.local
+supabase-laco-ai/lccb_ai_2/python/.env.local
+supabase-laco-pos/backend/.env
+supabase-laco-pos/.env
+supabase-laco-pos/frontend/.env.local
